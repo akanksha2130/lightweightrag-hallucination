@@ -175,8 +175,8 @@ If you use this code or paper, please cite:
   title     = {LightweightRAG: A Training-Free Framework for Hallucination
                Reduction in Resource-Constrained Environments},
   author    = {Singh, Akanksha},
-  booktitle = {Proceedings of the IEEE Conference on Applied Machine Learning},
-  year      = {2025},
+  booktitle = {Under Review — IEEE Conference},
+  year      = {2026},
   note      = {Code: https://github.com/akanksha2130/lightweightrag-hallucination}
 }
 ```
