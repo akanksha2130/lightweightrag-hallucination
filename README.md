@@ -6,7 +6,7 @@
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/akanksha2130/lightweightrag-hallucination/blob/main/notebooks/LightweightRAG_Experiments.ipynb)
 
 > **Paper:** *LightweightRAG: A Training-Free Framework for Hallucination Reduction in Resource-Constrained Environments*  
-> **Author:** Akanksha Singh, Department of CSE, IET Ayodhya  
+> **Author:** Akanksha Singh
 
 ---
 
