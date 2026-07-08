@@ -35,3 +35,5 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+!results/manual_validation_150.csv
