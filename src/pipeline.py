@@ -6,7 +6,7 @@ Runs entirely on CPU — no GPU required.
 
 Components:
   - BM25 sparse retrieval       (rank-bm25)
-  - Dense semantic retrieval    (all-MiniLM-L6-v2 + FAISS-CPU)
+  - Dense semantic retrieval    (all-MiniLM-L6-v2, numpy cosine similarity)
   - Reciprocal Rank Fusion      (parameter-free combination)
   - Answer generation           (Flan-T5-base, beam search)
   - Evidence verification       (cosine similarity threshold)
@@ -25,7 +25,6 @@ from typing import List, Optional, Tuple, Dict
 
 # ── Retrieval ──────────────────────────────────────────────────────────────
 from rank_bm25 import BM25Okapi
-import faiss
 from sentence_transformers import SentenceTransformer
 
 # ── Generation ────────────────────────────────────────────────────────────
@@ -92,13 +91,12 @@ class LightweightRAG:
         # Will be populated by build_index()
         self.chunks:        List[str]  = []
         self.bm25:          Optional[BM25Okapi] = None
-        self.faiss_index:   Optional[faiss.IndexFlatIP] = None
         self.chunk_embeddings: Optional[np.ndarray] = None
 
     # ── Index building ──────────────────────────────────────────────────
     def build_index(self, passages: List[str]) -> None:
         """
-        Chunk all passages, build BM25 index and FAISS index.
+        Chunk all passages, build BM25 index and dense embedding matrix.
 
         Parameters
         ----------
@@ -114,7 +112,7 @@ class LightweightRAG:
         tokenized = [c.lower().split() for c in self.chunks]
         self.bm25  = BM25Okapi(tokenized, k1=1.5, b=0.75)
 
-        # Dense embeddings + FAISS
+        # Dense embeddings (cosine similarity via numpy, no external index)
         self._log("Encoding chunks with MiniLM (one-time cost) …")
         t0 = time.time()
         embeddings = self.embedder.encode(
@@ -124,9 +122,6 @@ class LightweightRAG:
         self.chunk_embeddings = embeddings.astype("float32")
         self._log(f"  → Encoded in {time.time()-t0:.1f}s")
 
-        dim = self.chunk_embeddings.shape[1]
-        self.faiss_index = faiss.IndexFlatIP(dim)   # inner-product on L2-normalised = cosine
-        self.faiss_index.add(self.chunk_embeddings)
         self._log("Index ready.")
 
     # ── Public query interface ──────────────────────────────────────────
@@ -203,8 +198,8 @@ class LightweightRAG:
         q_emb = self.embedder.encode(
             [query], convert_to_numpy=True, normalize_embeddings=True
         ).astype("float32")
-        _, dense_idxs = self.faiss_index.search(q_emb, self.top_k)
-        dense_ranks = dense_idxs[0].tolist()
+        sims = (self.chunk_embeddings @ q_emb.T).flatten()
+        dense_ranks = np.argsort(-sims)[:self.top_k].tolist()
 
         # RRF fusion
         rrf_scores: Dict[int, float] = {}
@@ -219,19 +214,20 @@ class LightweightRAG:
     # ── Generation ──────────────────────────────────────────────────────
     def _generate(self, question: str, context: str, mode: str) -> str:
         """Run Flan-T5-base generation with the appropriate prompt template."""
+        context = context[:800]   # matches paper's stated methodology (Section IV-F)
         if mode == "boolean":
             prompt = (
+                f"Question: {question}\n"
                 f"Read the passage and answer yes or no.\n"
                 f"Passage: {context}\n"
-                f"Question: {question}\n"
                 f"Answer yes or no:"
             )
             max_new = MAX_NEW_TOKENS_BOOL
         else:
             prompt = (
+                f"Question: {question}\n"
                 f"Read the passage and answer the question.\n"
-                f"Passage: {context}\n"
-                f"Question: {question}"
+                f"Passage: {context}"
             )
             max_new = MAX_NEW_TOKENS_QA
 
@@ -250,7 +246,7 @@ class LightweightRAG:
     # ── Evidence verification ────────────────────────────────────────────
     def _verify_extractive(self, answer: str, chunks: List[str]) -> bool:
         """Cosine similarity between answer embedding and chunk embeddings."""
-        if not answer or len(answer.split()) < 2:
+        if not answer:
             return False
         ans_emb = self.embedder.encode(
             [answer], convert_to_numpy=True, normalize_embeddings=True

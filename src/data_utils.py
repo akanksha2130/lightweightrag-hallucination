@@ -5,7 +5,9 @@ Dataset loading and preprocessing for LightweightRAG evaluation.
 
 Supports:
   - SQuAD v2.0  (answerable subset, validation split)
-  - BoolQ       (validation split)
+  - TriviaQA    (rc.wikipedia config, validation split)
+  - BoolQ       (validation split; not used in the current paper,
+                 kept for backward compatibility)
 """
 
 from typing import List, Tuple, Optional
@@ -63,6 +65,58 @@ def load_squad(
         ids.append(ex["id"])
 
     print(f"Loaded {len(questions)} SQuAD v2.0 examples from {split} split.")
+    return questions, contexts, ground_truths, ids
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TriviaQA
+# ══════════════════════════════════════════════════════════════════════════
+
+def load_triviaqa(
+    n: int,
+    split: str = "validation",
+    seed: int = 42,
+    offset: int = 0,
+) -> Tuple[List[str], List[str], List[List[str]], List[str]]:
+    """
+    Load n examples from TriviaQA (rc.wikipedia config).
+
+    Only examples with a non-empty Wikipedia context are kept, since the
+    pipeline requires a retrievable context passage per question.
+
+    Parameters
+    ----------
+    n      : number of examples to load
+    split  : "validation" (default)
+    seed   : random seed for reproducibility
+    offset : skip the first `offset` examples (for non-overlapping splits)
+
+    Returns
+    -------
+    (questions, contexts, ground_truths, ids)
+      questions     : list of question strings
+      contexts      : list of Wikipedia passage strings (one per question)
+      ground_truths : list of list of valid answer strings/aliases
+      ids           : list of example IDs (question_id)
+    """
+    dataset = load_dataset("mandarjoshi/trivia_qa", "rc.wikipedia", split=split)
+    dataset = dataset.filter(lambda x: len(x["entity_pages"]["wiki_context"]) > 0)
+
+    indices = list(range(len(dataset)))
+    random.seed(seed)
+    random.shuffle(indices)
+    indices = indices[offset: offset + n]
+
+    questions, contexts, ground_truths, ids = [], [], [], []
+    for i in indices:
+        ex = dataset[i]
+        questions.append(ex["question"])
+        contexts.append(ex["entity_pages"]["wiki_context"][0])
+        answers = list(set(ex["answer"]["aliases"] + [ex["answer"]["value"]]))
+        ground_truths.append(answers)
+        ids.append(ex["question_id"])
+
+    print(f"Loaded {len(questions)} TriviaQA examples from {split} split.")
     return questions, contexts, ground_truths, ids
 
 
