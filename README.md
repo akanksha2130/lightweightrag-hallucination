@@ -1,12 +1,13 @@
-# LightweightRAG: A Training-Free Framework for Hallucination Reduction
+# LightweightRAG: A Training-Free Hybrid RAG Framework for Hallucination Reduction on CPU-Only Infrastructure
 
 [![CPU Only](https://img.shields.io/badge/Hardware-CPU%20Only-green)]()
 [![No Training](https://img.shields.io/badge/Training-None%20Required-blue)]()
-[![Python 3.12](https://img.shields.io/badge/Python-3.12-yellow)]()
+[![Python 3.10](https://img.shields.io/badge/Python-3.10-yellow)]()
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/akanksha2130/lightweightrag-hallucination/blob/main/notebooks/LightweightRAG_Experiments.ipynb)
 
-> **Paper:** *LightweightRAG: A Training-Free Framework for Hallucination Reduction in Resource-Constrained Environments*  
-> **Author:** Akanksha Singh
+> **Paper:** *LightweightRAG: A Statistically Validated, Training-Free Hybrid Retrieval-Augmented Generation Framework for Hallucination Reduction on CPU-Only Infrastructure*
+> **Authors:** Akanksha Singh, Dr. Chandan Kumar
+> **Venue:** ICSIT 2026 (under revision)
 
 ---
 
@@ -16,20 +17,22 @@ LightweightRAG is a **CPU-only, training-free hybrid RAG pipeline** that reduces
 
 It combines:
 - **BM25** sparse retrieval (keyword matching)
-- **all-MiniLM-L6-v2** dense retrieval (semantic similarity, 22.7M params)
+- **all-MiniLM-L6-v2** dense retrieval (semantic similarity, 22.7M params, cosine similarity via numpy — no external vector index required)
 - **Reciprocal Rank Fusion** (parameter-free combination)
 - **Flan-T5-base** answer generation (250M params, instruction-tuned)
-- **Evidence verification** (cosine similarity threshold for safe abstention)
+- **Evidence verification** (cosine-similarity threshold for conditional abstention)
 
 ### Key Results
 
 | Dataset | Baseline Hall. | LightweightRAG Hall. | Reduction | Significance |
-|---------|---------------|----------------------|-----------|--------------|
-| SQuAD v2.0 (real LLM, n=100) | 97.0% | 37.0% | **62%** | p < 0.001 |
-| BoolQ (real LLM, n=100) | 70.0% | 32.0% | **54%** | p < 0.001 |
-| SQuAD v2.0 (proxy oracle, n=300) | 70.8% | 16.2% | **77%** | p < 0.001 |
+|---|---|---|---|---|
+| SQuAD v2.0 (real generation, n=500, α=0.05) | 98.0% | 41.5% | 57.7% relative | p < 0.001 |
+| TriviaQA (n=200, α=0.05) | 92.0% | 67.7% | 26.4% relative | p < 0.001 |
+| SQuAD v2.0 (oracle extraction, n=300) | 98.3% | 39.7% | — | McNemar vs. BM25-only: p=0.47 |
 
-**Retrieval pipeline latency: 0.23 s | Full system latency: 2.47 s — on Colab CPU**
+Manual validation of the EM-based hallucination metric against human judgment on a 150-sample subset: **84.7% agreement (127/150)**.
+
+**Mean latency: ~2.4–3.3 s/query on Colab CPU (2 vCPUs, no GPU).**
 
 ---
 
@@ -41,18 +44,14 @@ lightweightrag-hallucination/
 ├── src/                          ← Core library (import this)
 │   ├── __init__.py
 │   ├── pipeline.py               ← LightweightRAG class (main pipeline)
-│   ├── evaluation.py             ← EM, F1, McNemar test, Wilson CI
-│   └── data_utils.py             ← SQuAD v2.0 and BoolQ data loaders
+│   ├── evaluation.py             ← EM, F1, McNemar test, Wilson CI, corrected HR/RR
+│   └── data_utils.py             ← SQuAD v2.0, TriviaQA, and BoolQ data loaders
 │
 ├── notebooks/
-│   └── LightweightRAG_Experiments.ipynb   ← Reproduces ALL paper tables
+│   └── LightweightRAG_Experiments.ipynb   ← Reproduces all paper tables
 │
-├── assets/
-│   ├── architecture.png          ← Figure 1: Pipeline architecture
-│   ├── ablation_chart.png        ← Figure 2: Ablation bar chart
-│   └── threshold_sensitivity_curve.png    ← Figure 3: Threshold trade-off
-│
-├── requirements.txt              ← Pinned package versions
+├── results/                      ← Saved raw outputs backing each paper table
+├── requirements.txt
 └── README.md
 ```
 
@@ -60,12 +59,11 @@ lightweightrag-hallucination/
 
 ## Quick Start
 
-### Option 1: Open in Colab (Recommended — no setup needed)
+### Option 1: Open in Colab (recommended)
 
-Click the **Open in Colab** badge above. The notebook installs all dependencies automatically.
+Click the **Open in Colab** badge above.
 
-> ⚠️ **Important:** In Colab, go to **Runtime → Change runtime type → CPU**.  
-> This paper specifically evaluates CPU-only performance — do NOT select GPU.
+> ⚠️ **Important:** In Colab, go to **Runtime → Change runtime type → CPU**. This paper specifically evaluates CPU-only performance — do not select GPU.
 
 ### Option 2: Run locally
 
@@ -78,10 +76,8 @@ pip install -r requirements.txt
 ```python
 from src.pipeline import LightweightRAG
 
-# Initialise pipeline (downloads models on first run, ~500 MB)
-rag = LightweightRAG(verbose=True)
+rag = LightweightRAG(tau_extractive=0.05, verbose=True)
 
-# Build index from your documents
 passages = [
     "The Colorado River flows through the Grand Canyon in Arizona. "
     "It is approximately 1,450 miles long.",
@@ -89,11 +85,9 @@ passages = [
 ]
 rag.build_index(passages)
 
-# Ask a question
 result = rag.answer("What river flows through the Grand Canyon?")
-print(result["answer"])    # → "Colorado River"
-print(result["abstained"]) # → False
-print(result["latency"])   # → {'retrieval': 0.22, 'generation': 1.94, ...}
+print(result["answer"])     # → "Colorado River"
+print(result["abstained"])  # → False
 ```
 
 ---
@@ -102,24 +96,20 @@ print(result["latency"])   # → {'retrieval': 0.22, 'generation': 1.94, ...}
 
 Open `notebooks/LightweightRAG_Experiments.ipynb` in Colab and run cells in order.
 
-Each cell is labelled with the corresponding paper table:
+| Cells | Experiment | Paper Table |
+|---|---|---|
+| 3–9 | SQuAD v2.0 real generation (Configs A/B/C, n=500) | Table II |
+| 10–14 | Threshold calibration | Section IV-G |
+| 19–28 | Final Table II compilation + Wilson CI + McNemar | Table II |
+| 29–30 | SQuAD v2.0 oracle extraction (n=300) | Table I |
+| 31–33 | TriviaQA cross-domain evaluation (n=200) | Table III |
+| 34, 40 | Ablation study (BM25-only / dense-only / hybrid RRF, n=100) | Table IV |
+| 26 | Threshold sensitivity sweep | Table V |
+| 36–38 | Qualitative case studies | Section VI-F |
+| 39 | Manual HR-validation set generation (n=150) | Section VII-B |
+| 43–47 | Latency benchmarking | Latency columns |
 
-| Cell | Experiment | Paper Table |
-|------|-----------|-------------|
-| 6–9  | SQuAD Real LLM (3 configs) | Table I |
-| 10   | BoolQ Real LLM (3 configs) | Table II |
-| 11   | SQuAD Proxy Oracle (n=300) | Table III |
-| 12   | McNemar significance tests | Table V |
-| 13   | Ablation study | Table VI |
-| 14   | Threshold sensitivity | Table VII |
-| 15   | Latency breakdown | Table VIII |
-| 16   | TinyLlama comparison | Section VI-I |
-
----
-
-## Pipeline Architecture
-
-![Architecture](assets/architecture.png)
+**Note:** The notebook saves intermediate results to Google Drive (`/content/drive/MyDrive/lightweightrag_results/`) so long-running cells can be resumed after a Colab disconnect. If you don't want to use Drive, redirect `SAVE_PATH`/`SAVE_*` variables to a local path instead — the pipeline itself has no Drive dependency.
 
 ---
 
@@ -131,38 +121,41 @@ Each cell is labelled with the corresponding paper table:
 LightweightRAG(
     embed_model    = "sentence-transformers/all-MiniLM-L6-v2",
     gen_model      = "google/flan-t5-base",
-    tau_extractive = 0.25,   # verification threshold for span QA
-    tau_boolean    = 0.30,   # verification threshold for yes/no QA
+    tau_extractive = 0.05,   # verification/abstention threshold (paper default, Section IV-G)
     top_k          = 5,      # chunks retrieved per retriever
     verbose        = False,
 )
 ```
 
 | Method | Description |
-|--------|-------------|
-| `build_index(passages)` | Chunk passages, build BM25 + FAISS index |
+|---|---|
+| `build_index(passages)` | Chunk passages, build BM25 index and dense embedding matrix |
 | `answer(question, mode)` | Full pipeline → `{answer, abstained, chunks, latency}` |
 
-**`mode`:** `"extractive"` (SQuAD-style) or `"boolean"` (BoolQ-style)
+**`mode`:** `"extractive"` (SQuAD/TriviaQA-style) or `"boolean"` (BoolQ-style)
 
-### Threshold guide
+### Threshold guide (SQuAD v2.0, n=500 — Table V)
 
-| τ value | Hallucination | Refusal | Best for |
-|---------|--------------|---------|----------|
-| 0.10 | 37% | 34% | General assistant |
-| 0.25 ★ | 18% | 63% | **Default (balanced)** |
-| 0.35 | 7% | 87% | High-safety (medical, legal) |
+| α | Hallucination | Refusal | EM | Guidance |
+|---|---|---|---|---|
+| 0.05 | 41.5% | 2.6% | 57.0% | **Default** |
+| 0.25 | 47.0% | 32.4% | 35.8% | Not recommended |
+| 0.50 | 56.7% | 79.2% | 9.0% | Not recommended |
+| 0.70 | 64.3% | 97.2% | 1.0% | Not recommended |
+| 0.80 | 100.0% | 99.8% | 0.0% | No utility |
+
+Note the non-monotonic relationship: because the cosine-similarity confidence score correlates only weakly (and at times negatively, Pearson r=−0.17) with answer correctness, raising α *increases* rather than decreases hallucination on this metric. See Section VII-A/B of the paper for discussion.
 
 ---
 
 ## Hardware Requirements
 
 | Component | Minimum | Used in paper |
-|-----------|---------|---------------|
-| CPU | Any x86-64 | Google Colab free tier (~2 cores) |
+|---|---|---|
+| CPU | Any x86-64 | Google Colab free tier (2 vCPUs) |
 | RAM | 6 GB | 12 GB available |
-| GPU | **Not required** | **Not used** |
-| Storage | 2 GB (models) | — |
+| GPU | **Not required** | **Not used at any stage** |
+| Storage | ~2 GB (models) | — |
 
 ---
 
@@ -171,11 +164,12 @@ LightweightRAG(
 If you use this code or paper, please cite:
 
 ```bibtex
-@inproceedings{singh2025lightweightrag,
-  title     = {LightweightRAG: A Training-Free Framework for Hallucination
-               Reduction in Resource-Constrained Environments},
-  author    = {Singh, Akanksha},
-  booktitle = {Under Review — IEEE Conference},
+@inproceedings{singh2026lightweightrag,
+  title     = {LightweightRAG: A Statistically Validated, Training-Free Hybrid
+               Retrieval-Augmented Generation Framework for Hallucination
+               Reduction on CPU-Only Infrastructure},
+  author    = {Singh, Akanksha and Kumar, Chandan},
+  booktitle = {ICSIT 2026},
   year      = {2026},
   note      = {Code: https://github.com/akanksha2130/lightweightrag-hallucination}
 }

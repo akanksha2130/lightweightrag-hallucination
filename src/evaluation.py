@@ -116,6 +116,60 @@ def compute_metrics(
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# Corrected HR/RR (paper Eq. 3/4)
+# ══════════════════════════════════════════════════════════════════════════
+
+def compute_hr_rr_correct(
+    raw_answers:  List[str],
+    confidences:  List[float],
+    golds:        List[List[str]],
+    alpha:        float,
+) -> Tuple[float, float, float]:
+    """
+    Correct implementation of the paper's Eq. 3 (Hallucination Rate) and
+    Eq. 4 (Refusal Rate).
+
+    NOTE ON WHY THIS FUNCTION EXISTS SEPARATELY FROM `compute_metrics`:
+    `compute_metrics` above folds abstained queries into the hallucination
+    count (hall_flags.append(1) for every abstention), which does NOT match
+    the paper's definition. Eq. 3 defines HR over Q' = Q \\ {refused queries}
+    only — abstentions are excluded from the HR denominator entirely, not
+    counted as hallucinations. `compute_metrics`'s hallucination_rate field
+    should therefore be treated as legacy/deprecated for HR reporting; use
+    this function instead when reproducing paper tables (all tables in the
+    current paper draft were generated with this function, not with
+    `compute_metrics`'s hallucination_rate).
+
+    Parameters
+    ----------
+    raw_answers : list of str   — model's raw (pre-abstention) answers
+    confidences : list of float — max cosine similarity to retrieved chunks
+    golds       : list of list  — valid gold answers per query
+    alpha       : float         — abstention threshold; confidence < alpha
+                                  means the query is refused (Eq. 4)
+
+    Returns
+    -------
+    (em_rate, hallucination_rate, refusal_rate) — all as percentages
+    """
+    n = len(raw_answers)
+    verified = [c >= alpha for c in confidences]
+    n_verified = sum(verified)
+
+    mismatches = sum(
+        1 for i in range(n)
+        if verified[i] and exact_match(raw_answers[i], golds[i]) == 0
+    )
+    em_rate = 100 * sum(
+        exact_match(raw_answers[i], golds[i]) for i in range(n) if verified[i]
+    ) / n
+    hr = 100 * mismatches / n_verified if n_verified else 0.0
+    rr = 100 * (n - n_verified) / n
+
+    return em_rate, hr, rr
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # Statistical tests
 # ══════════════════════════════════════════════════════════════════════════
 
